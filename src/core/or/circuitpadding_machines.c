@@ -494,6 +494,8 @@ circpad_machine_common_wf_rbp(circpad_event_t event)
   m->states[CIRCPAD_STATE_BURST].
      histogram[1] = 8;
   m->states[CIRCPAD_STATE_BURST].
+     histogram_total_tokens = 10;
+  m->states[CIRCPAD_STATE_BURST].
      token_removal = CIRCPAD_TOKEN_REMOVAL_NONE;
 
   // how much padding to add
@@ -507,6 +509,8 @@ circpad_machine_common_wf_rbp(circpad_event_t event)
      histogram[0] = 9;
   m->states[CIRCPAD_STATE_GAP].
      histogram[1] = 1;
+  m->states[CIRCPAD_STATE_GAP].
+     histogram_total_tokens = 10;
   m->states[CIRCPAD_STATE_GAP].
      token_removal = CIRCPAD_TOKEN_REMOVAL_NONE;
 
