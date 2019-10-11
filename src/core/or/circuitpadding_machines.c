@@ -471,6 +471,8 @@ circpad_machine_common_wf_rbp(circpad_event_t event)
 
   circpad_machine_states_init(m, 3);
 
+  // When packets are sent/received, transition state 1
+  // In state 1, the histogram is sampled to decide if padding should be sent
   m->states[CIRCPAD_STATE_START].
      next_state[event] = CIRCPAD_STATE_BURST;
 
@@ -479,8 +481,14 @@ circpad_machine_common_wf_rbp(circpad_event_t event)
      next_state[CIRCPAD_EVENT_INFINITY] = CIRCPAD_STATE_START;
   m->states[CIRCPAD_STATE_GAP].
      next_state[CIRCPAD_EVENT_INFINITY] = CIRCPAD_STATE_START;
+  //m->states[CIRCPAD_STATE_GAP].
+  //   next_state[CIRCPAD_EVENT_LENGTH_COUNT] = CIRCPAD_STATE_START;
+
+  // Whenever transition to state 2, padding is sent
+  m->states[CIRCPAD_STATE_BURST].
+     next_state[CIRCPAD_EVENT_PADDING_SENT] = CIRCPAD_STATE_GAP;
   m->states[CIRCPAD_STATE_GAP].
-     next_state[CIRCPAD_EVENT_LENGTH_COUNT] = CIRCPAD_STATE_START;
+     next_state[CIRCPAD_EVENT_PADDING_SENT] = CIRCPAD_STATE_GAP;
 
   // when to add padding
   m->states[CIRCPAD_STATE_BURST].
@@ -495,6 +503,8 @@ circpad_machine_common_wf_rbp(circpad_event_t event)
      histogram[1] = 8;
   m->states[CIRCPAD_STATE_BURST].
      histogram_total_tokens = 10;
+  m->states[CIRCPAD_STATE_BURST].
+     use_rtt_estimate = 0;
   m->states[CIRCPAD_STATE_BURST].
      token_removal = CIRCPAD_TOKEN_REMOVAL_NONE;
 
@@ -511,6 +521,8 @@ circpad_machine_common_wf_rbp(circpad_event_t event)
      histogram[1] = 1;
   m->states[CIRCPAD_STATE_GAP].
      histogram_total_tokens = 10;
+  m->states[CIRCPAD_STATE_GAP].
+     use_rtt_estimate = 0;
   m->states[CIRCPAD_STATE_GAP].
      token_removal = CIRCPAD_TOKEN_REMOVAL_NONE;
 
