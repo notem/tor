@@ -112,10 +112,7 @@ circpad_machine_client_hide_intro_circuits(smartlist_t *machines_sl)
   /* Keep the circuit alive even after the introduction has been finished,
    * otherwise the short-term lifetime of the circuit will blow our cover */
   client_machine->manage_circ_lifetime = 1;
-
-  /* Set padding machine limits to help guard against excessive padding */
-  client_machine->allowed_padding_count = INTRO_MACHINE_MAXIMUM_PADDING;
-  client_machine->max_padding_percent = 1;
+/* Set padding machine limits to help guard against excessive padding */ client_machine->allowed_padding_count = INTRO_MACHINE_MAXIMUM_PADDING; client_machine->max_padding_percent = 1;
 
   /* Two states: START, OBFUSCATE_CIRC_SETUP (and END) */
   circpad_machine_states_init(client_machine, 2);
@@ -455,4 +452,160 @@ circpad_machine_relay_hide_rend_circuits(smartlist_t *machines_sl)
   log_info(LD_CIRC,
            "Registered relay rendezvous circuit hiding padding machine (%u)",
            relay_machine->machine_num);
+}
+
+/**
+ */
+circpad_machine_spec_t * 
+circpad_machine_common_wf_rbp(circpad_event_t event)
+{
+  circpad_machine_spec_t *m
+  = tor_malloc_zero(sizeof(circpad_machine_spec_t));
+
+  m->target_hopnum = 2;	// use middle/internal relay
+  m->conditions.min_hops = 2;
+  m->conditions.state_mask = CIRCPAD_CIRC_STREAMS;
+
+  // Allow up to double bandwidth overhead.
+  m->max_padding_percent = 50;
+
+  circpad_machine_states_init(m, 3);
+
+  m->states[CIRCPAD_STATE_START].
+     next_state[event] = CIRCPAD_STATE_BURST;
+
+  // Transition back to start whenever the infinity bin is sampled.
+  m->states[CIRCPAD_STATE_BURST].
+     next_state[CIRCPAD_EVENT_INFINITY] = CIRCPAD_STATE_START;
+  m->states[CIRCPAD_STATE_GAP].
+     next_state[CIRCPAD_EVENT_INFINITY] = CIRCPAD_STATE_START;
+  m->states[CIRCPAD_STATE_GAP].
+     next_state[CIRCPAD_EVENT_LENGTH_COUNT] = CIRCPAD_STATE_START;
+
+  // when to add padding
+  m->states[CIRCPAD_STATE_BURST].
+     histogram_len = 2;
+  m->states[CIRCPAD_STATE_BURST].
+     histogram_edges[0] = 0;
+  m->states[CIRCPAD_STATE_BURST].
+     histogram_edges[1] = 1;
+  m->states[CIRCPAD_STATE_BURST].
+     histogram[0] = 2;
+  m->states[CIRCPAD_STATE_BURST].
+     histogram[1] = 8;
+  m->states[CIRCPAD_STATE_BURST].
+     token_removal = CIRCPAD_TOKEN_REMOVAL_NONE;
+
+  // how much padding to add
+  m->states[CIRCPAD_STATE_GAP].
+     histogram_len = 2;
+  m->states[CIRCPAD_STATE_GAP].
+     histogram_edges[0] = 0;
+  m->states[CIRCPAD_STATE_GAP].
+     histogram_edges[1] = 1;
+  m->states[CIRCPAD_STATE_GAP].
+     histogram[0] = 9;
+  m->states[CIRCPAD_STATE_GAP].
+     histogram[1] = 1;
+  m->states[CIRCPAD_STATE_GAP].
+     token_removal = CIRCPAD_TOKEN_REMOVAL_NONE;
+
+  return m;
+}
+
+/**
+ */
+void
+circpad_machine_relay_wf_reb(smartlist_t *machines_sl)
+{
+  circpad_machine_spec_t *relay_machine = circpad_machine_common_wf_rbp(CIRCPAD_EVENT_NONPADDING_SENT);
+  relay_machine->name = "relay_wf_reb";
+  relay_machine->is_origin_side = 0;
+
+  //relay_machine->allowed_padding_count = 1000;
+
+  relay_machine->conditions.purpose_mask = 
+    circpad_circ_purpose_to_mask(CIRCUIT_PURPOSE_C_GENERAL)|
+    circpad_circ_purpose_to_mask(CIRCUIT_PURPOSE_C_CIRCUIT_PADDING);
+
+  /* Register the machine */
+  relay_machine->machine_num = smartlist_len(machines_sl);
+  circpad_register_padding_machine(relay_machine, machines_sl);
+
+  log_info(LD_CIRC,
+           "Registered relay random extending bursts padding machine (%u)",
+           relay_machine->machine_num);
+}
+
+
+/**
+ */
+void
+circpad_machine_client_wf_reb(smartlist_t *machines_sl)
+{
+  circpad_machine_spec_t *client_machine = circpad_machine_common_wf_rbp(CIRCPAD_EVENT_NONPADDING_SENT);
+  client_machine->name = "client_wf_reb";
+  client_machine->is_origin_side = 1;
+
+  //client_machine->allowed_padding_count = 1000;
+
+  client_machine->conditions.purpose_mask = 
+    circpad_circ_purpose_to_mask(CIRCUIT_PURPOSE_C_GENERAL)|
+    circpad_circ_purpose_to_mask(CIRCUIT_PURPOSE_C_CIRCUIT_PADDING);
+
+  /* Register the machine */
+  client_machine->machine_num = smartlist_len(machines_sl);
+  circpad_register_padding_machine(client_machine, machines_sl);
+
+  log_info(LD_CIRC,
+           "Registered client random extending bursts padding machine (%u)",
+           client_machine->machine_num);
+}
+
+/**
+ */
+void
+circpad_machine_relay_wf_rbb(smartlist_t *machines_sl)
+{
+  circpad_machine_spec_t *relay_machine = circpad_machine_common_wf_rbp(CIRCPAD_EVENT_NONPADDING_RECV);
+  relay_machine->name = "relay_wf_rbb";
+  relay_machine->is_origin_side = 0;
+
+  //relay_machine->allowed_padding_count = 1000;
+
+  relay_machine->conditions.purpose_mask = 
+    circpad_circ_purpose_to_mask(CIRCUIT_PURPOSE_C_GENERAL)|
+    circpad_circ_purpose_to_mask(CIRCUIT_PURPOSE_C_CIRCUIT_PADDING);
+
+  /* Register the machine */
+  relay_machine->machine_num = smartlist_len(machines_sl);
+  circpad_register_padding_machine(relay_machine, machines_sl);
+
+  log_info(LD_CIRC,
+           "Registered relay random break bursts padding machine (%u)",
+           relay_machine->machine_num);
+}
+
+/**
+ */
+void
+circpad_machine_client_wf_rbb(smartlist_t *machines_sl)
+{
+  circpad_machine_spec_t *client_machine = circpad_machine_common_wf_rbp(CIRCPAD_EVENT_NONPADDING_RECV);
+  client_machine->name = "client_wf_rbb";
+  client_machine->is_origin_side = 1;
+
+  //client_machine->allowed_padding_count = 1000;
+
+  client_machine->conditions.purpose_mask = 
+    circpad_circ_purpose_to_mask(CIRCUIT_PURPOSE_C_GENERAL)|
+    circpad_circ_purpose_to_mask(CIRCUIT_PURPOSE_C_CIRCUIT_PADDING);
+
+  /* Register the machine */
+  client_machine->machine_num = smartlist_len(machines_sl);
+  circpad_register_padding_machine(client_machine, machines_sl);
+
+  log_info(LD_CIRC,
+           "Registered client random break bursts padding machine (%u)",
+           client_machine->machine_num);
 }

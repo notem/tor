@@ -2660,6 +2660,14 @@ circpad_machines_init(void)
   circpad_machine_client_hide_rend_circuits(origin_padding_machines);
   circpad_machine_relay_hide_rend_circuits(relay_padding_machines);
 
+  /* Register random burst padding machines*/
+  // Random Extending Bursts
+  circpad_machine_client_wf_reb(origin_padding_machines);
+  circpad_machine_relay_wf_reb(relay_padding_machines);
+  // Random Break Bursts (no delay)
+  //circpad_machine_client_wf_rbb(origin_padding_machines);
+  //circpad_machine_relay_wf_rbb(relay_padding_machines);
+
   // TODO: Parse machines from consensus and torrc
 #ifdef TOR_UNIT_TESTS
   circpad_circ_client_machine_init();
