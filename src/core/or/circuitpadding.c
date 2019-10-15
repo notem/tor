@@ -2666,11 +2666,11 @@ circpad_machines_init(void)
 
   /* Register random burst padding machines*/
   // Random Extending Bursts
-  //circpad_machine_client_wf_reb(origin_padding_machines);
-  //circpad_machine_relay_wf_reb(relay_padding_machines);
+  circpad_machine_client_wf_reb(origin_padding_machines);
+  circpad_machine_relay_wf_reb(relay_padding_machines);
   // Random Break Bursts (no delay)
-  circpad_machine_client_wf_rbb(origin_padding_machines);
-  circpad_machine_relay_wf_rbb(relay_padding_machines);
+  //circpad_machine_client_wf_rbb(origin_padding_machines);
+  //circpad_machine_relay_wf_rbb(relay_padding_machines);
   // TODO: should both REB and RBB(no-delay) be active simultaneously? 
   // Needs further exploration, although expecting low effectiveness in 
   // either case.
