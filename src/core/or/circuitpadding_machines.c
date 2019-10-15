@@ -454,7 +454,11 @@ circpad_machine_relay_hide_rend_circuits(smartlist_t *machines_sl)
            relay_machine->machine_num);
 }
 
-/**
+/** Create a generic random burst padding machine.
+ * The circpad_event_t event defines on what event (pkt recv/sent) padding
+ * should trigger. The likelyhood for a fake burst to start on the trigger
+ * and continue after each fake packet is defined by perc_to_proc and
+ * perc_to_pad respectively.
  */
 circpad_machine_spec_t * 
 circpad_machine_common_wf_rbp(circpad_event_t event)
@@ -462,45 +466,59 @@ circpad_machine_common_wf_rbp(circpad_event_t event)
   circpad_machine_spec_t *m
   = tor_malloc_zero(sizeof(circpad_machine_spec_t));
 
+  // Active on the middle relay for circuits containing flows
   m->target_hopnum = 2;	// use middle/internal relay
   m->conditions.min_hops = 2;
   m->conditions.state_mask = CIRCPAD_CIRC_STREAMS;
+  m->conditions.purpose_mask = 
+    circpad_circ_purpose_to_mask(CIRCUIT_PURPOSE_C_GENERAL)|
+    circpad_circ_purpose_to_mask(CIRCUIT_PURPOSE_C_CIRCUIT_PADDING);
 
   // Allow up to double bandwidth overhead.
   m->max_padding_percent = 50;
 
+  // Random burst padding needs three states.
+  // +One is the idle state
+  // +Two is the state which decides when to add a fake burst
+  // +Three is the state where the length of the fake burst is determined
   circpad_machine_states_init(m, 3);
 
-  // When packets are sent/received, transition state 1
-  // In state 1, the histogram is sampled to decide if padding should be sent
+  // The start state transitions to the second state when packets are sent(REB) or received(RBB)
   m->states[CIRCPAD_STATE_START].
      next_state[event] = CIRCPAD_STATE_BURST;
 
-  // Transition back to start whenever the infinity bin is sampled.
+  // Transition back to start when the infinity bin is sampled in either states two or three.
+  // +In state two, the infinity bin signals that a fake burst should NOT be sent
   m->states[CIRCPAD_STATE_BURST].
      next_state[CIRCPAD_EVENT_INFINITY] = CIRCPAD_STATE_START;
+  // +In state three, the infinity bin signals that a fake burst should end
   m->states[CIRCPAD_STATE_GAP].
      next_state[CIRCPAD_EVENT_INFINITY] = CIRCPAD_STATE_START;
-  //m->states[CIRCPAD_STATE_GAP].
-  //   next_state[CIRCPAD_EVENT_LENGTH_COUNT] = CIRCPAD_STATE_START;
+  // Stop padding if the maximum padding per burst is reached.
+  m->states[CIRCPAD_STATE_GAP].
+     next_state[CIRCPAD_EVENT_LENGTH_COUNT] = CIRCPAD_STATE_START;
 
-  // Whenever transition to state 2, padding is sent
+  // Machine should transition to state three when padding is sent (ie. fake burst is active)
   m->states[CIRCPAD_STATE_BURST].
      next_state[CIRCPAD_EVENT_PADDING_SENT] = CIRCPAD_STATE_GAP;
   m->states[CIRCPAD_STATE_GAP].
      next_state[CIRCPAD_EVENT_PADDING_SENT] = CIRCPAD_STATE_GAP;
 
-  // when to add padding
+  // State Two Histogram definition:
+  // +Two bins
+  // +Infinity bin indicates not to start fake burst
+  // +Zero bin immediantly starts fake burst
   m->states[CIRCPAD_STATE_BURST].
      histogram_len = 2;
   m->states[CIRCPAD_STATE_BURST].
      histogram_edges[0] = 0;
   m->states[CIRCPAD_STATE_BURST].
      histogram_edges[1] = 1;
+  // 10% to start padding
   m->states[CIRCPAD_STATE_BURST].
-     histogram[0] = 2;
+     histogram[0] = 1;
   m->states[CIRCPAD_STATE_BURST].
-     histogram[1] = 8;
+     histogram[1] = 9;
   m->states[CIRCPAD_STATE_BURST].
      histogram_total_tokens = 10;
   m->states[CIRCPAD_STATE_BURST].
@@ -508,28 +526,50 @@ circpad_machine_common_wf_rbp(circpad_event_t event)
   m->states[CIRCPAD_STATE_BURST].
      token_removal = CIRCPAD_TOKEN_REMOVAL_NONE;
 
-  // how much padding to add
+  // State Three Histogram definition:
+  // +Two bins
+  // +Infinity bin indicates not end fake burst
+  // +Zero bin continues burst with additional cell
   m->states[CIRCPAD_STATE_GAP].
      histogram_len = 2;
   m->states[CIRCPAD_STATE_GAP].
      histogram_edges[0] = 0;
   m->states[CIRCPAD_STATE_GAP].
      histogram_edges[1] = 1;
+  // 50% to continue padding, 50% to end
   m->states[CIRCPAD_STATE_GAP].
-     histogram[0] = 9;
+     histogram[0] = 5;
   m->states[CIRCPAD_STATE_GAP].
-     histogram[1] = 1;
+     histogram[1] = 5;
   m->states[CIRCPAD_STATE_GAP].
      histogram_total_tokens = 10;
   m->states[CIRCPAD_STATE_GAP].
      use_rtt_estimate = 0;
   m->states[CIRCPAD_STATE_GAP].
      token_removal = CIRCPAD_TOKEN_REMOVAL_NONE;
+  // Set maximum number of cells per fake burst.
+  m->states[CIRCPAD_STATE_GAP].
+     length_dist.type = CIRCPAD_DIST_UNIFORM;
+  m->states[CIRCPAD_STATE_GAP].
+     start_length = 5;
+  m->states[CIRCPAD_STATE_GAP].
+     max_length = 5;
+  m->states[CIRCPAD_STATE_GAP].
+     length_includes_nonpadding = 0;
+  // Note: An alternative way of implementing this state would to solely end 
+  // fake bursts based on the sampled histogram length condition. For example,
+  // a uniform distribution from [0,6] could be used with a 100% chance to 
+  // sample 0 usec delays to achieve equal likely hood of small and large 
+  // fake bursts.
+  // TODO: simulated experiments needed for better tuning
 
   return m;
 }
 
-/**
+/** Create a relay-side padding machine that aims to reduce website
+ * traffic fingerprintability by inserting random fake bursts into
+ * the circuit. In particular, this machine triggers fake bursts when
+ * real packets are sent (eg. extends bursts).
  */
 void
 circpad_machine_relay_wf_reb(smartlist_t *machines_sl)
@@ -540,10 +580,6 @@ circpad_machine_relay_wf_reb(smartlist_t *machines_sl)
 
   //relay_machine->allowed_padding_count = 1000;
 
-  relay_machine->conditions.purpose_mask = 
-    circpad_circ_purpose_to_mask(CIRCUIT_PURPOSE_C_GENERAL)|
-    circpad_circ_purpose_to_mask(CIRCUIT_PURPOSE_C_CIRCUIT_PADDING);
-
   /* Register the machine */
   relay_machine->machine_num = smartlist_len(machines_sl);
   circpad_register_padding_machine(relay_machine, machines_sl);
@@ -553,8 +589,10 @@ circpad_machine_relay_wf_reb(smartlist_t *machines_sl)
            relay_machine->machine_num);
 }
 
-
-/**
+/** Create a client-side padding machine that aims to reduce website
+ * traffic fingerprintability by inserting random fake bursts into
+ * the circuit. In particular, this machine triggers fake bursts when
+ * real packets are sent (eg. extends bursts).
  */
 void
 circpad_machine_client_wf_reb(smartlist_t *machines_sl)
@@ -565,10 +603,6 @@ circpad_machine_client_wf_reb(smartlist_t *machines_sl)
 
   //client_machine->allowed_padding_count = 1000;
 
-  client_machine->conditions.purpose_mask = 
-    circpad_circ_purpose_to_mask(CIRCUIT_PURPOSE_C_GENERAL)|
-    circpad_circ_purpose_to_mask(CIRCUIT_PURPOSE_C_CIRCUIT_PADDING);
-
   /* Register the machine */
   client_machine->machine_num = smartlist_len(machines_sl);
   circpad_register_padding_machine(client_machine, machines_sl);
@@ -578,7 +612,10 @@ circpad_machine_client_wf_reb(smartlist_t *machines_sl)
            client_machine->machine_num);
 }
 
-/**
+/** Create a relay-side padding machine that aims to reduce website
+ * traffic fingerprintability by inserting random fake bursts into
+ * the circuit. In particular, this machine triggers fake bursts when
+ * real packets are recieved from the client.
  */
 void
 circpad_machine_relay_wf_rbb(smartlist_t *machines_sl)
@@ -589,10 +626,6 @@ circpad_machine_relay_wf_rbb(smartlist_t *machines_sl)
 
   //relay_machine->allowed_padding_count = 1000;
 
-  relay_machine->conditions.purpose_mask = 
-    circpad_circ_purpose_to_mask(CIRCUIT_PURPOSE_C_GENERAL)|
-    circpad_circ_purpose_to_mask(CIRCUIT_PURPOSE_C_CIRCUIT_PADDING);
-
   /* Register the machine */
   relay_machine->machine_num = smartlist_len(machines_sl);
   circpad_register_padding_machine(relay_machine, machines_sl);
@@ -602,7 +635,10 @@ circpad_machine_relay_wf_rbb(smartlist_t *machines_sl)
            relay_machine->machine_num);
 }
 
-/**
+/** Create a client-side padding machine that aims to reduce website
+ * traffic fingerprintability by inserting random fake bursts into
+ * the circuit. In particular, this machine triggers fake bursts when
+ * real packets are recieved from the relay.
  */
 void
 circpad_machine_client_wf_rbb(smartlist_t *machines_sl)
@@ -612,10 +648,6 @@ circpad_machine_client_wf_rbb(smartlist_t *machines_sl)
   client_machine->is_origin_side = 1;
 
   //client_machine->allowed_padding_count = 1000;
-
-  client_machine->conditions.purpose_mask = 
-    circpad_circ_purpose_to_mask(CIRCUIT_PURPOSE_C_GENERAL)|
-    circpad_circ_purpose_to_mask(CIRCUIT_PURPOSE_C_CIRCUIT_PADDING);
 
   /* Register the machine */
   client_machine->machine_num = smartlist_len(machines_sl);

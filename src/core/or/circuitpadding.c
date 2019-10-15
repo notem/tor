@@ -1462,12 +1462,15 @@ circpad_machine_schedule_padding,(circpad_machine_runtime_t *mi))
   } else {
     mi->padding_scheduled_at_usec = 1;
   }
-  log_fn(LOG_INFO,LD_CIRC,"\tPadding in %u usec on circuit %u", in_usec,
-       CIRCUIT_IS_ORIGIN(mi->on_circ) ?
-           TO_ORIGIN_CIRCUIT(mi->on_circ)->global_identifier : 0);
+  //log_fn(LOG_INFO,LD_CIRC,"\tPadding in %u usec on circuit %u", in_usec,
+  //     CIRCUIT_IS_ORIGIN(mi->on_circ) ?
+  //         TO_ORIGIN_CIRCUIT(mi->on_circ)->global_identifier : 0);
 
   // Don't schedule if we have infinite delay.
   if (in_usec == CIRCPAD_DELAY_INFINITE) {
+    log_fn(LOG_INFO,LD_CIRC,"\tSampled from infinity bin on circuit %u", 
+         CIRCUIT_IS_ORIGIN(mi->on_circ) ?
+             TO_ORIGIN_CIRCUIT(mi->on_circ)->global_identifier : 0);
     return circpad_internal_event_infinity(mi);
   }
 
@@ -1482,7 +1485,8 @@ circpad_machine_schedule_padding,(circpad_machine_runtime_t *mi))
   }
 
   if (in_usec <= 0) {
-    return circpad_send_padding_cell_for_callback(mi);
+    //return circpad_send_padding_cell_for_callback(mi);
+    in_usec = 0;
   }
 
   timeout.tv_sec = in_usec/TOR_USEC_PER_SEC;
@@ -2662,11 +2666,14 @@ circpad_machines_init(void)
 
   /* Register random burst padding machines*/
   // Random Extending Bursts
-  circpad_machine_client_wf_reb(origin_padding_machines);
-  circpad_machine_relay_wf_reb(relay_padding_machines);
+  //circpad_machine_client_wf_reb(origin_padding_machines);
+  //circpad_machine_relay_wf_reb(relay_padding_machines);
   // Random Break Bursts (no delay)
-  //circpad_machine_client_wf_rbb(origin_padding_machines);
-  //circpad_machine_relay_wf_rbb(relay_padding_machines);
+  circpad_machine_client_wf_rbb(origin_padding_machines);
+  circpad_machine_relay_wf_rbb(relay_padding_machines);
+  // TODO: should both REB and RBB(no-delay) be active simultaneously? 
+  // Needs further exploration, although expecting low effectiveness in 
+  // either case.
 
   // TODO: Parse machines from consensus and torrc
 #ifdef TOR_UNIT_TESTS
